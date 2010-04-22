@@ -1,0 +1,164 @@
+#!/bin/bash
+
+vs="0.2.2"
+
+trap ctrl_c SIGINT
+
+ctrl_c() {
+	pkill dd &>/dev/null
+	rm -f ${cfile} &>/dev/null
+	exit $?
+}
+
+usage() {
+        msg=$1
+        if [ -n "${msg}" ]; then
+                echo -e "${msg}\n"
+        fi
+        cat <<EOF
+Usage:
+  $0 [options]
+
+Options:
+  -f, --file [/path/fs]		Path to your container
+  -l, --loop [loopback dev]	Loopback device (typically /dev/loop0)
+  -s, --size [int]M/G/T		Size of filesystem
+  -i, --hidden [int]		Number of hidden devices
+  -b, --blocks [int]		Number of blocks per hidden device
+  -p, --password [prefix]	Provide an iterative password prefix
+  -h, --help			This
+  -v, --version			Version
+
+Example:
+  $0 -f /tmp/fs -l loop0 -s 400M -i 3
+
+EOF
+        exit
+}
+
+inject_data () {
+	echo ">>> Injecting data ..."
+	for i in $(seq 1 $k )
+	do
+	        echo hidden$i > ${cmount}${i}/hidden$i
+	        echo "  hidden$i > ${cmount}${i}/hidden$i"
+	done
+}
+
+dump_data() {
+	echo ">>> Dumping data ..."
+	for i in $(seq 1 $k )
+	do
+	        printf "  " ; cat ${cmount}${i}/hidden$i
+	done
+}
+
+compare_data() {
+	echo ">>> Comparing data ..."
+	corrupt=no
+	for i in $(seq 1 $k)
+	do
+		if [ "$(cat ${cmount}${i}/hidden$i)" == "hidden${i}" ]
+		then
+			echo "  ${cmount}${i}/hidden$i data OK"
+		else
+			echo "  ${cmount}${i}/hidden$i data CORRUPTED"
+			echo "FAILED"
+			exit 1
+		fi
+	done
+}
+
+report() {
+	echo ">>> $success"
+}
+
+TEMP=`getopt -o f:l:s:i:b:p:hv --long file:,loop:,size:,hidden:,blocks:,password:,help,version -- "$@"`
+
+if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
+eval set -- "$TEMP"
+
+i=0
+while true ; do
+    let i=i+1
+    case "$1" in
+        -f|--file) 	
+			cfile=$2
+			shift 2 ;;
+	-l|--loop)	
+			cloop=$2
+			shift 2 ;;
+	-s|--size)
+			ccount=$2
+			shift 2 ;;
+	-i|--hidden)
+			chidden=$2
+			shift 2 ;;
+	-b|--blocks)
+			cblocks=$2
+			shift 2 ;;
+	-p|--password)
+			cpass=$2
+			shift 2 ;;
+        -h|--help)
+                        usage
+                        ;;
+        -v|--version)
+                        echo $vs
+                        exit
+                        ;;
+
+	--) shift ; break ;;
+        *) echo "Internal error!" ; exit 1 ;;
+    esac
+done
+
+cmount=/mnt/here
+
+[ -z ${cfile} ] && usage "ERROR"
+[ -z ${cloop} ] && usage "ERROR"
+[ -z ${ccount} ] && usage "ERROR"
+[ -z ${chidden} ] && usage "ERROR"
+
+[ -b /dev/${cloop} ] || usage "/dev/${cloop} is not a block device"
+
+# Creating the filesystem
+dfstouch -f $cfile -s $ccount || usage "dfstouch error"
+[ -e $cfile ] || usage "$cfile does not exist"
+
+cfileb=$(basename $cfile)
+cdevice=$(echo $cdevice | sed -e 's/,/ /g')
+
+k="$chidden"
+
+if [ -z $cblocks ]
+then
+	for j in $(seq 1 $k)
+	do
+        	mydevices="${mydevices},${j}=1"
+	done
+else
+	
+	for j in $(seq 1 $k)
+	do
+		mydevices="${mydevices},${j}=${cblocks}"
+	done
+fi
+mydevices=${mydevices#?} # remove leading char
+
+dfsopen -f $cfile -l $cloop -d $mydevices -m /mnt/here -k -y -p prefixpassword || exit 1
+inject_data
+dump_data
+dfsclose -f $cfile -l $cloop -n $k 
+dfsopen -f $cfile -l $cloop -d $mydevices -m /mnt/here -y -p prefixpassword 
+success=FAILED
+compare_data && success=SUCCESS
+for h in $(seq 1 ${k})
+do
+	denyfs --offset /dev/mapper/${cfileb}${h}
+	tabledev="${tabledev} /dev/mapper/${cfileb}${h}"
+done
+denyfs --table ${tabledev}
+dfsclose -f $cfile -l $cloop -n $k
+
+report 

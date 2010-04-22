@@ -1,0 +1,109 @@
+#!/bin/bash
+
+trap ctrl_c SIGINT
+
+vs="0.2.2"
+
+usage() {
+        msg=$1
+        if [ -n "${msg}" ]; then
+                echo -e "${msg}\n"
+        fi
+        cat <<EOF
+Usage:
+  $0 [options]
+
+Options:
+  -f, --file [/path/fs]		Path to your filesystem
+  -s, --size [int]M/G/T		Size in M/G/T
+  -h, --help			This
+  -v, --version 		Version
+
+Example:
+  $0 -f /tmp/fs -s 4G
+  $0 -f /tmp/fs -s 200M
+
+EOF
+	exit 1
+}
+
+ctrl_c() {
+	# cleanup
+	pkill dd
+	rm -f ${cfile} 
+	echo
+	exit $?
+}
+
+TEMP=`getopt -o f:s:hv --long file:,size:,help,version -- "$@"`
+
+if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
+eval set -- "$TEMP"
+
+i=0
+while true ; do
+    let i=i+1
+    case "$1" in
+        -f|--file) 	
+			cfile=$2
+			shift 2 ;;
+	-s|--size)	
+			ccount=$2
+			shift 2 ;;
+
+	-h|--help)
+			usage
+			;;
+
+	-v|--version)
+			echo $vs
+			exit
+			;;
+
+	--) shift ; break ;;
+        *) echo "Internal error!" ; exit 1 ;;
+    esac
+done
+
+[ -z ${cfile} ]  && usage "ERROR"
+[ -z ${ccount} ] && usage "ERROR"
+[ -e ${cfile} ] && usage "${cfile} already exists"
+
+cblock="512K"
+
+unit=$(echo $ccount | awk '{print substr($0,length,1)}')
+if [ "$unit" == "M" ]
+then
+	ccount=$(echo $ccount | sed -e 's/.$//')
+	let ccount=$((  ccount * 2   ))
+fi
+if [ "$unit" == "G" ]
+then
+	ccount=$(echo $ccount | sed -e 's/.$//')
+	let ccount=$((  ccount * 2000   ))
+fi
+if [ "$unit" == "T" ]
+then
+	ccount=$(echo $ccount | sed -e 's/.$//')
+	let ccount=$((  ccount * 2000000   ))
+fi
+
+dd if=/dev/urandom of=${cfile} bs=${cblock} count=${ccount} &
+sleep 1 # if the file is created before 1 second, no need of a progress bar :}
+while [ -n "$(ps --no-headers $!)" ]
+do
+	sleep 2
+	tput reset
+	a=$(du ${cfile} | cut -f1 | sed -e 's/.$//' | cut -f1 -d.)
+	let val=$(( 2 * $a  ))
+	let val=$(( $val / $ccount ))
+	if [ $val -gt 100 ]
+	then
+		echo -n ">>> ${cfile} done"
+	else
+		echo -n ">>> Randomizing ${cfile} ${val}%"
+	fi
+done
+echo
+
+

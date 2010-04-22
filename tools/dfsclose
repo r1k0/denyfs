@@ -1,0 +1,96 @@
+#!/bin/bash
+
+vs="0.2.2"
+
+usage() {
+        msg=$1
+        if [ -n "${msg}" ]; then
+                echo -e "${msg}\n"
+        fi
+        cat <<EOF
+Usage:
+  $0 [options]
+
+Options:
+  -f, --file [/path/fs]		Path to filename
+  -l, --loop [loop]		Loop device
+  -n, --numdev [int]		Number of subdevices to close in FIFO order
+  -h, --help			This
+  -v, --version			Version
+
+Example:
+  $0 -f /tmp/fs -l loop0 -n 9
+EOF
+        exit
+}
+
+TEMP=`getopt -o f:l:n:hv --long file:,loop:,numdev:,help,version -- "$@"`
+
+if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
+eval set -- "$TEMP"
+
+i=0
+while true ; do
+    let i=i+1
+    case "$1" in
+        -f|--file) 	
+			cfile=$2
+			shift 2 ;;
+	-l|--loop)	
+			cloop=$2
+			shift 2 ;;
+
+	-n|--numdev)
+			k=$2
+			shift 2 ;;
+	
+	-h|--help)
+			usage
+			;;
+
+	-v|--version)
+			echo $vs
+			exit
+			;;
+
+	--) shift ; break ;;
+        *) echo "Internal error!" ; exit 1 ;;
+    esac
+done
+
+[ -z ${cfile} ]  && usage "ERROR"
+[ -z ${cloop} ] && usage "ERROR"
+[ -z ${k} ] && usage "ERROR"
+
+cfileb=$(basename ${cfile})
+#cfiled=$(dirname ${cfile})
+
+echo ">>> Unmounting filesystems ..."
+for i in $(seq 1 ${k})
+do
+	if umount /dev/mapper/${cfileb}${i}_new &>/dev/null
+	then
+		echo "  /dev/mapper/${cfileb}${i}_new OK"
+	fi
+done
+
+echo ">>> Unmapping dmsetup block devices ..."
+for i in $(seq 1 ${k})
+do
+	if dmsetup remove ${cfileb}${i}_new &>/dev/null
+	then
+		echo "  /dev/mapper/${cfileb}${i}_new OK"
+	fi
+done
+
+echo ">>> Unmapping cryptsetup devices ..."
+for i in $(seq 1 ${k})
+do
+	if cryptsetup remove ${cfileb}${i} &>/dev/null
+	then
+		echo "  /dev/mapper/${cfileb}${i} OK"
+	fi
+done
+
+echo ">>> Unbinding /dev/${cloop} ..."
+losetup -d /dev/${cloop}

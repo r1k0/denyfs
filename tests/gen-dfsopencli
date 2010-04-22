@@ -1,0 +1,22 @@
+#!/bin/bash
+
+usage() {
+	echo $1
+	echo "  Usage: $0 [number of devices] [number of block per devices]"
+	exit 
+}
+
+[ -z $1 ] && usage "ERROR: number of devices missing"
+[ -z $2 ] && usage "ERROR: number of blocks per device missing"
+
+count=$1
+for j in $(seq 1 $count)
+do
+	mydevices="${mydevices},${j}=$2"
+done
+
+let count2=$count+1 
+mydevices="${mydevices},${count2}=$2"
+mydevices=${mydevices#?} # remove leading char
+
+echo "time dfsopen -f /tmp/fs -l loop0 -d $mydevices -m /mnt/here -k -y"

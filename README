@@ -1,0 +1,486 @@
+###########################
+### using denyfs itself ###
+###########################
+
+//Create a 100Mb file and fill it with urandom data
+$ dd if=/dev/urandom of=fs bs=512K count=200
+
+//Create a loopback device
+# losetup /dev/loop0 fs
+
+//Create a cryptsetup device
+# cryptsetup create fs1 /dev/loop0
+# cryptsetup create fs2 /dev/loop0
+# cryptsetup create fs3 /dev/loop0
+# cryptsetup create fs4 /dev/loop0
+# cryptsetup create fs5 /dev/loop0
+...
+
+NOTE:	Choose a DIFFERENT password for EACH FS.
+	Those devices are created in /dev/mapper/
+	You can go up to 16 this way.
+
+//Check the number of total blocks available for each crypted device
+# denyfs --table /dev/mapper/fs1
+# denyfs --table /dev/mapper/fs2
+...
+
+OR
+
+//Check 'em all at the same time
+# denyfs --table /dev/mapper/fs?
+
+//Size up the cryptsetup device using denyfs
+# denyfs --setsize 1,13 /dev/mapper/fs?
+# denyfs --setsize 2,2 /dev/mapper/fs?
+# denyfs --setsize 3,30 /dev/mapper/fs?
+
+NOTE:	You don't have to allocate all blocks.
+	You need to set up devices in the RIGHT order.
+
+//Create a linearized crypted device.
+//It is where we'll be able to hide data on a regular FS (i.e. ext2).
+# denyfs --dmsetup fs1_new /dev/mapper/fs1
+# denyfs --dmsetup fs2_new /dev/mapper/fs2
+...
+
+NOTE:
+
+//Create an ext2 FS on top of it
+# mke2fs -m 0 /dev/mapper/fs1_new
+# mke2fs -m 0 /dev/mapper/fs2_new
+...
+
+NOTE:	You can use ext3 though it is not recommended.
+	Try to avoid journalized FS even if it should work though.
+
+//Mount the whole
+# mount /dev/mapper/fs1_new /foo/bar1
+# mount /dev/mapper/fs1_new /foo/bar2
+...
+
+
+NOW, you can interact on /foo/bar1 and 2
+as if it was a regular entry point.
+
+i.e hide your data there ^^
+
+//Umount the whole
+# umount /dev/mapper/fs1_new
+# umount /dev/mapper/fs2_new
+...
+
+//Remove dmsetup devices
+# dmsetup remove fs1_new
+# dmsetup remove fs2_new
+...
+
+//Remove cryptsetup devices
+# cryptsetup remove fs1
+# cryptsetup remove fs2
+...
+
+//Remove loopback device
+# losetup -d /dev/loop0
+
+Finally redo those steps without changing the size of blocks.
+When you create your cryptsetup device, select one of the 
+	passwords you have set previously to mount 
+	the corresponding denyfs.
+
+Enjoy your privacy!
+
+
+######################
+# using dfs wrappers #
+######################
+
+   1. First create a container in a location of your choice.
+
+      aspire 0.1.1 # dfstouch -h
+      Usage:
+      /usr/sbin/dfstouch [options]
+
+      Options:
+      -f, --file [/path/fs] Path to your filesystem
+      -c, --count [int] Block iteration (multiple of 512K)
+      -h, --help This
+      -v, --version Print version
+
+      Example:
+      # this creates a 200M file container
+      /usr/sbin/dfstouch -f fs -c 400
+
+      aspire 0.1.1 #
+      aspire 0.1.1 # dfstouch -f /tmp/fs -c 400
+      >>> Creating 204M fs ... OK
+      aspire 0.1.1 #
+   2. Then open the file and give your secret volume mapping. Assume the stealth volume is the 3rd one. The -m option will create your volume mount points within /mnt/here. The -k option asks to create an Ext2 filesystem an top of the new volumes. Of course -k is required only for the first time.
+
+      aspire 0.1.1 # dfsopen -h
+      Usage:
+      /usr/sbin/dfsopen [options]
+
+      Options:
+      -f, --file [/path/fs] Path to your container
+      -b, --block [int]K/M Size of a single block
+      -c, --count [int] Block iteration (-b X -c = size of file)
+      -m, --mount [/path] Path to mountpoint
+      -k, --mkfs Initialize the filesystem (run the first time only)
+      -h, --help This
+      -v, --version Print version
+
+      Example:
+      # note the -k option will create a filesystem when first run
+      /usr/sbin/dfsopen -f fs -l loop0 -d 1=2,2=2,3=5,4=2,5=6,6=4,7=2,8=3,9=2 -m /mnt/here -k
+
+      # a daily command
+      /usr/sbin/dfsopen -f fs -l loop0 -d 1=2,2=2,3=5,4=2,5=6,6=4,7=2,8=3,9=2 -m /mnt/here
+
+      aspire 0.1.1 #
+      aspire 0.1.1 # dfsopen -f /tmp/fs -l loop0 -d 1=10,2=3,3=1 -m /mnt/here -k
+      >>> Binding to loop0 ... OK
+      >>> Mapping cryptsetup block devices ...
+      Enter passphrase:
+      Enter passphrase:
+      Enter passphrase:
+      >>> Sizing up block devices ...
+      device 1 ...
+      Checking device structure ...
+      Do you intend to resize? (CTRL-C to abort)
+      Enlarging ...
+      using empty block 81 becomes block 0 of /dev/mapper/fs1
+      using empty block 84 becomes block 1 of /dev/mapper/fs1
+      using empty block 5 becomes block 2 of /dev/mapper/fs1
+      using empty block 83 becomes block 3 of /dev/mapper/fs1
+      using empty block 86 becomes block 4 of /dev/mapper/fs1
+      using empty block 95 becomes block 5 of /dev/mapper/fs1
+      using empty block 15 becomes block 6 of /dev/mapper/fs1
+      using empty block 18 becomes block 7 of /dev/mapper/fs1
+      using empty block 64 becomes block 8 of /dev/mapper/fs1
+      using empty block 67 becomes block 9 of /dev/mapper/fs1
+      device 2 ...
+      Checking device structure ...
+      Do you intend to resize? (CTRL-C to abort)
+      Enlarging ...
+      using empty block 4 becomes block 0 of /dev/mapper/fs2
+      using empty block 8 becomes block 1 of /dev/mapper/fs2
+      device 3 ...
+      Checking device structure ...
+      Do you intend to resize? (CTRL-C to abort)
+      Enlarging ...
+      using empty block 90 becomes block 0 of /dev/mapper/fs3
+      >>> Mapping to crytpsetup block devices ...
+      Checking device structure ...
+      Checking device structure ...
+      Checking device structure ...
+      >>> Creating filesystems ...
+      mke2fs 1.41.8 (11-July-2009)
+      Étiquette de système de fichiers=
+      Type de système d'exploitation : Linux
+      Taille de bloc=1024 (log=0)
+      Taille de fragment=1024 (log=0)
+      5136 i-noeuds, 20480 blocs
+      0 blocs (0.00%) réservés pour le super utilisateur
+      Premier bloc de données=1
+      Nombre maximum de blocs du système de fichiers=20971520
+      3 groupes de blocs
+      8192 blocs par groupe, 8192 fragments par groupe
+      1712 i-noeuds par groupe
+      Superblocs de secours stockés sur les blocs :
+      8193
+
+      Écriture des tables d'i-noeuds : complété
+      Écriture des superblocs et de l'information de comptabilité du système de
+      fichiers : complété
+
+      Le système de fichiers sera automatiquement vérifié tous les 20 montages ou
+      après 180 jours, selon la première éventualité. Utiliser tune2fs -c ou -i
+      pour écraser la valeur.
+      mke2fs 1.41.8 (11-July-2009)
+      Étiquette de système de fichiers=
+      Type de système d'exploitation : Linux
+      Taille de bloc=1024 (log=0)
+      Taille de fragment=1024 (log=0)
+      1024 i-noeuds, 4096 blocs
+      0 blocs (0.00%) réservés pour le super utilisateur
+      Premier bloc de données=1
+      Nombre maximum de blocs du système de fichiers=4194304
+      1 groupe de bloc
+      8192 blocs par groupe, 8192 fragments par groupe
+      1024 i-noeuds par groupe
+
+      Écriture des tables d'i-noeuds : complété
+      Écriture des superblocs et de l'information de comptabilité du système de
+      fichiers : complété
+
+      Le système de fichiers sera automatiquement vérifié tous les 37 montages ou
+      après 180 jours, selon la première éventualité. Utiliser tune2fs -c ou -i
+      pour écraser la valeur.
+      mke2fs 1.41.8 (11-July-2009)
+      Étiquette de système de fichiers=
+      Type de système d'exploitation : Linux
+      Taille de bloc=1024 (log=0)
+      Taille de fragment=1024 (log=0)
+      256 i-noeuds, 2048 blocs
+      0 blocs (0.00%) réservés pour le super utilisateur
+      Premier bloc de données=1
+      Nombre maximum de blocs du système de fichiers=2097152
+      1 groupe de bloc
+      8192 blocs par groupe, 8192 fragments par groupe
+      256 i-noeuds par groupe
+
+      Écriture des tables d'i-noeuds : complété
+      Écriture des superblocs et de l'information de comptabilité du système de
+      fichiers : complété
+
+      Le système de fichiers sera automatiquement vérifié tous les 21 montages ou
+      après 180 jours, selon la première éventualité. Utiliser tune2fs -c ou -i
+      pour écraser la valeur.
+      >>> Mounting filesystems ...
+      /mnt/here1 mounted
+      /mnt/here2 mounted
+      /mnt/here3 mounted
+      aspire 0.1.1 #
+   3. Check things are as expected. Verify your block table matches your design. The -t option will dump you a view of the space ratio. Dump the block offset per volume using the -o option.
+
+      aspire 0.1.1 #
+      aspire 0.1.1 # df -h | grep here
+      /dev/mapper/fs1_new 20M 172K 20M 1% /mnt/here1
+      /dev/mapper/fs2_new 3,9M 29K 3,9M 1% /mnt/here2
+      /dev/mapper/fs3_new 2,0M 21K 2,0M 2% /mnt/here3
+      aspire 0.1.1 #
+      aspire 0.1.1 # mount | grep here
+      /dev/mapper/fs1_new on /mnt/here1 type ext2 (rw)
+      /dev/mapper/fs2_new on /mnt/here2 type ext2 (rw)
+      /dev/mapper/fs3_new on /mnt/here3 type ext2 (rw)
+      aspire 0.1.1 #
+      aspire 0.1.1 # tree -h /mnt/here?
+      /mnt/here1
+      `-- [ 12K] lost+found
+      /mnt/here2
+      `-- [ 12K] lost+found
+      /mnt/here3
+      `-- [ 12K] lost+found
+
+      3 directories, 0 files
+      aspire 0.1.1 #
+      aspire 0.1.1 # denyfs -h
+      Usage:
+      denyfs [option]
+
+      Where [option] is one of the following:
+      -t, --table [loop]? display devices block table
+      -l, --list-freeblocks [loop]? list free blocks
+      -o, --offset [cryptsetup device] print offsets of blocks of a single device
+      -s, --setsize [int1],[int2] [loop]? set size of device nb [int1] with [int2] block
+      -d, --dmsetup [new device] dmsetup device mount
+      -v, --version version
+      -h, --help this.
+
+      Example:
+      denyfs -o /dev/mapper/fs1
+      denyfs -t /dev/mapper/fs?
+      denyfs -s 1,12 /dev/mapper/fs?
+      denyfs -s 2,2 /dev/mapper/fs?
+      denyfs -l /dev/mapper/fs?
+      denyfs -d fs1_new /dev/mapper/fs1
+
+      aspire 0.1.1 #
+      aspire 0.1.1 # denyfs -t /dev/mapper/fs?
+      Checking device structure ...
+      Nb of blocks Device Device nb Size
+      + 10 /dev/mapper/fs1 1 20Mb
+      + 2 /dev/mapper/fs2 2 4Mb
+      + 1 /dev/mapper/fs3 3 2Mb
+      + 86 < -- Total nb of free blocks
+      -----------
+      = 99 <-- Total nb of blocks
+      space ratio: 86% free
+      aspire 0.1.1 #
+      aspire 0.1.1 # denyfs -o /dev/mapper/fs1
+      Checking device structure ...
+      0 4096 linear /dev/mapper/fs1 331882
+      4096 4096 linear /dev/mapper/fs1 344170
+      8192 4096 linear /dev/mapper/fs1 20586
+      12288 4096 linear /dev/mapper/fs1 340074
+      16384 4096 linear /dev/mapper/fs1 352362
+      20480 4096 linear /dev/mapper/fs1 389226
+      24576 4096 linear /dev/mapper/fs1 61546
+      28672 4096 linear /dev/mapper/fs1 73834
+      32768 4096 linear /dev/mapper/fs1 262250
+      36864 4096 linear /dev/mapper/fs1 274538
+      aspire 0.1.1 #
+      aspire 0.1.1 # denyfs -o /dev/mapper/fs2
+      Checking device structure ...
+      0 4096 linear /dev/mapper/fs2 16490
+      4096 4096 linear /dev/mapper/fs2 32874
+      aspire 0.1.1 #
+      aspire 0.1.1 # denyfs -o /dev/mapper/fs3
+      Checking device structure ...
+      0 4096 linear /dev/mapper/fs3 368746
+      aspire 0.1.1 #
+      aspire 0.1.1 #
+   4. Now hide your data. Fill in /mnt/here1 /mnt/here2 and /mnt/here3 the last one being your secret place, here2 a data flare (supposed to be a fake secret place) and here1 just personal garbage. Let's put 15Mb in here1 3Mb in here2 and 1Mb in here1.
+
+      aspire 0.1.1 # ls -lh sizzla*
+      -rwxr-xr-x 1 root root 4,0M août 23 14:56 sizzla.mp3
+      -rwxr-xr-x 1 root root 691K août 23 15:26 sizzla-small.mp3
+      -rw-r--r-- 1 root root 16M août 23 14:57 sizzlax4.mp3
+      aspire 0.1.1 # cp sizzlax4.mp3 /mnt/here1
+      aspire 0.1.1 # cp sizzla.mp3 /mnt/here2/
+      aspire 0.1.1 # cp sizzla-small.mp3 /mnt/here3
+      aspire 0.1.1 #
+      aspire 0.1.1 # tree -h /mnt/here?
+      /mnt/here1
+      |-- [ 12K] lost+found
+      `-- [ 16M] sizzlax4.mp3
+      /mnt/here2
+      |-- [ 12K] lost+found
+      `-- [4.0M] sizzla.mp3
+      /mnt/here3
+      |-- [ 12K] lost+found
+      `-- [691K] sizzla-small.mp3
+
+      3 directories, 3 files
+      aspire 0.1.1 #
+   5. Close all volumes.
+
+      aspire 0.1.1 # dfsclose -h
+      Usage:
+      /usr/sbin/dfsclose [options]
+
+      Options:
+      -f, --file [/path/fs] Path to your filesystem
+      -l, --loop [loop] Loop device
+      -n, --numdev [int] Number of sub devices
+      -h, --help This
+      -v, --version Print version
+
+      Example:
+      /usr/sbin/dfsclose -f fs -l loop0 -n 9
+      aspire 0.1.1 #
+      aspire 0.1.1 # dfsclose -f fs -l loop0 -n 3
+      >>> Unmounting filesystems ...
+      /dev/mapper/fs1_new OK
+      /dev/mapper/fs2_new OK
+      /dev/mapper/fs3_new OK
+      >>> Unmapping dmsetup block devices ...
+      /dev/mapper/fs1_new OK
+      /dev/mapper/fs2_new OK
+      /dev/mapper/fs3_new OK
+      >>> Unmapping cryptsetup devices ...
+      /dev/mapper/fs1 OK
+      /dev/mapper/fs2 OK
+      /dev/mapper/fs3 OK
+      >>> Unbinding /dev/loop0 ...
+      aspire 0.1.1 #
+      aspire 0.1.1 # mount | grep here
+      aspire 0.1.1 # ls /dev/mapper/
+      control root swap
+      aspire 0.1.1 #
+   6. Let's reopen them all and check we still have the files and close again.
+
+      aspire 0.1.1 # dfsopen -f /tmp/fs -l loop0 -d 1=10,2=3,3=1 -m /mnt/here
+      >>> Binding to loop0 ... OK
+      >>> Mapping cryptsetup block devices ...
+      Enter passphrase:
+      Enter passphrase:
+      Enter passphrase:
+      >>> Sizing up block devices ...
+      device 1 ...
+      Checking device structure ...
+      device 2 ...
+      Checking device structure ...
+      device 3 ...
+      Checking device structure ...
+      >>> Mapping to crytpsetup block devices ...
+      Checking device structure ...
+      Checking device structure ...
+      Checking device structure ...
+      >>> Mounting filesystems ...
+      /mnt/here1 mounted
+      /mnt/here2 mounted
+      /mnt/here3 mounted
+      aspire 0.1.1 # tree -h /mnt/here?
+      /mnt/here1
+      |-- [ 12K] lost+found
+      `-- [ 16M] sizzlax4.mp3
+      /mnt/here2
+      |-- [ 12K] lost+found
+      `-- [4.0M] sizzla.mp3
+      /mnt/here3
+      |-- [ 12K] lost+found
+      `-- [691K] sizzla-small.mp3
+
+      3 directories, 3 files
+      aspire 0.1.1 # dfsclose -f fs -l loop0 -n 3
+      >>> Unmounting filesystems ...
+      /dev/mapper/fs1_new OK
+      /dev/mapper/fs2_new OK
+      /dev/mapper/fs3_new OK
+      >>> Unmapping dmsetup block devices ...
+      /dev/mapper/fs1_new OK
+      /dev/mapper/fs2_new OK
+      /dev/mapper/fs3_new OK
+      >>> Unmapping cryptsetup devices ...
+      /dev/mapper/fs1 OK
+      /dev/mapper/fs2 OK
+      /dev/mapper/fs3 OK
+      >>> Unbinding /dev/loop0 ...
+      aspire 0.1.1 #
+   7. Open the hidden volume only add a file to it and close it.
+
+      aspire 0.1.1 # dfsopen -f /tmp/fs -l loop0 -d 3=1 -m /mnt/here
+      >>> Binding to loop0 ... OK
+      >>> Mapping cryptsetup block devices ...
+      Enter passphrase:
+      >>> Sizing up block devices ...
+      device 1 ...
+      Checking device structure ...
+      >>> Mapping to crytpsetup block devices ...
+      Checking device structure ...
+      >>> Mounting filesystems ...
+      /mnt/here1 mounted
+      aspire 0.1.1 #
+      aspire 0.1.1 # tree -h /mnt/here?
+      /mnt/here1
+      |-- [ 12K] lost+found
+      `-- [691K] sizzla-small.mp3
+      /mnt/here2
+      /mnt/here3
+
+      1 directory, 2 files
+      aspire 0.1.1 #
+      aspire 0.1.1 # echo pi > /mnt/here1/secret
+      aspire 0.1.1 # tree -h /mnt/here?
+      /mnt/here1
+      |-- [ 12K] lost+found
+      |-- [ 3] secret
+      `-- [691K] sizzla-small.mp3
+      /mnt/here2
+      /mnt/here3
+
+      1 directory, 2 files
+      aspire 0.1.1 #
+      aspire 0.1.1 # dfsclose -f fs -l loop0 -n 1
+      >>> Unmounting filesystems ...
+      /dev/mapper/fs1_new OK
+      >>> Unmapping dmsetup block devices ...
+      /dev/mapper/fs1_new OK
+      >>> Unmapping cryptsetup devices ...
+      /dev/mapper/fs1 OK
+      >>> Unbinding /dev/loop0 ...
+      aspire 0.1.1 #
+   8. Open the hidden volume only with a wrong password.
+
+      aspire 0.1.1 # dfsopen -f /tmp/fs -l loop0 -d 3=1 -m /mnt/here
+      >>> Binding to loop0 ... OK
+      >>> Mapping cryptsetup block devices ...
+      Enter passphrase:
+      >>> Sizing up block devices ...
+      device 1 ...
+      Checking device structure ...
+      Do you intend to resize? (CTRL-C to abort) ^C
+      aspire 0.1.1 #
+      At this point you should be _very_ careful. If you do not intend to resize your volume than you must realize that your password is wrong (the password is parameter of the block mapping logic). If you do pursue you will resize the hidden volume. Although in some very lucky and special cases, if you enlarge your volume you may again access your previously hidden data, don't assume that in general as shrinking the volume will erase it for sure (unless again you free unused blocks but you'd really be lucky and you should play Euromillion).

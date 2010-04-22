@@ -1,0 +1,14 @@
+===
+dfstest: 
+automate testing by injecting fake passwords into cryptsetup
+ulimit -n 20048 # default is 1024
+ulimit -a
+===
+denyfs:
+unify all checking functions
+===
+denyfs: 
+Enlarging ...
+Empty block 871 becomes block 0 of /dev/mapper/fs84
+use that to display a progress bar for when no resize happens
+===

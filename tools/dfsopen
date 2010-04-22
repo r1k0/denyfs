@@ -1,0 +1,227 @@
+#!/bin/bash
+
+vs="0.2.2"
+
+mkfs=0
+yes=0
+
+usage() {
+        msg=$1
+        if [ -n "${msg}" ]; then
+                echo -e "${msg}\n"
+        fi
+        cat <<EOF
+Usage:
+  $0 [options]
+
+Options:
+  -f, --file [/path/fs]		Path to your container
+  -l, --loop [loopback dev]	Loopback device (typically /dev/loop0)
+  -d, --device [inta]=[intb],..	Containers map; inta is the device number intb the size in block (512K)
+  -m, --mount [/path]		Path to mountpoint
+  -k, --mkfs			Initialize the filesystem (run the first time only)
+  -y, --yes			Do not ask me any resize
+  -p, --password [prefix]	Provide and iteration password prefix
+  -e, --verbose			Be verbose
+  -h, --help			This
+  -v, --version			Version
+
+Examples:
+  # note the -k option will create a filesystem when first run
+  $0 -f /tmp/fs -l loop0 -d 1=2,2=2,3=5,4=2,5=6,6=4,7=2,8=3,9=2 -m /mnt/here -k -e
+  
+  # a daily command where the subdevice 3 is your hidden volume
+  $0 -f /tmp/fs -l loop0 -d 3=5 -m /mnt/here
+
+EOF
+        exit
+}
+
+bind_loop() {
+	printf ">>> Binding to /dev/${cloop} ... "
+	[ -b /dev/${cloop} ] || usage "/dev/${cloop} is not a block device"
+	if losetup /dev/${cloop} ${cfile} &>/dev/null
+	then
+	        echo "OK"
+	else
+	        echo "FAILED"
+	        exit 1
+	fi
+}
+
+crypt_block_dev() {
+	echo ">>> Setting up cryptsetup block devices ..."
+	for i in $(seq 1 ${k})
+	do
+		if [ -z $cpass ]
+		then
+	        	if cryptsetup create ${cfileb}${i} /dev/${cloop}
+	        	then
+	        	        echo "  /dev/mapper/${cfileb}${i} OK"
+	        	else
+	        	        echo "FAILED"
+	        	        exit 1
+	        	fi
+		else
+			if echo ${cpass}$i | cryptsetup create ${cfileb}${i} /dev/${cloop}
+			then
+				echo "  /dev/mapper/${cfileb}${i} OK"
+			else
+				echo "FAILED"
+				exit 1
+			fi
+		fi
+	done
+}
+
+size_block_dev() {
+	echo ">>> Sizing up block devices ..."
+	for i in $(seq 1 ${k})
+	do
+	        eval dev=${device}${i}
+	        eval bl='$'nb_block${i}
+	        mydevices=
+	        for j in $(seq 1 $k)
+	        do
+	                mydevices="${mydevices} /dev/mapper/${cfileb}${j} "
+	        done
+	
+	        yesopt=
+	        if [ "$yes" == "1" ]
+	        then
+	                yesopt="-y"
+	        fi
+	        if denyfs --setsize ${dev},${bl} ${mydevices} ${yesopt}
+	        then
+	                true
+	        else
+	                echo "FAILED"
+	                exit 1
+	        fi
+	done
+
+}
+
+map_crypt_dev() {
+	printf ">>> Mapping crytpsetup block devices to a new filesystem...\n"
+	for i in $(seq 1 ${k})
+	do
+	        if denyfs --dmsetup ${cfileb}${i}_new /dev/mapper/${cfileb}${i}
+	        then
+	                true
+	        else
+	                echo "FAILED"
+	                exit 1
+	        fi
+	done
+}
+
+create_fs() {
+        echo ">>> Creating filesystems ..."
+	if [ "$verbose" == "1" ]
+	then
+	        for i in $(seq 1 ${k})
+	        do
+	                mke2fs -m 0 /dev/mapper/${cfileb}${i}_new
+	        done
+	else
+		for i in $(seq 1 ${k})
+		do
+			mke2fs -m 0 /dev/mapper/${cfileb}${i}_new &>/dev/null 
+		done
+	fi
+}
+
+mount_fs() {
+	echo ">>> Mounting filesystems ..."
+	for i in $(seq 1 ${k})
+	do
+	        [ -d ${cmount}${i} ] || mkdir -p ${cmount}${i}
+	        if mount -t ext2 /dev/mapper/${cfileb}${i}_new ${cmount}${i}
+	        then
+	                echo "  ${cmount}${i} mounted"
+	        else
+	                echo "mount -t ext2 /dev/mapper/${cfileb}${i}_new ${cmount}${i} FAILED"
+	                if [ "$mkfs" != "no" ]
+	                then
+	                        echo "Password mistyped or corrupted data"
+	                fi
+			exit 1
+	        fi
+	done
+}
+TEMP=`getopt -o f:l:d:m:kyp:hve --long file:,loop:,device:,mount:,mkfs,yes,password:,help,version,verbose -- "$@"`
+
+if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
+eval set -- "$TEMP"
+
+i=0
+while true ; do
+    let i=i+1
+    case "$1" in
+        -f|--file) 	
+			cfile=$2
+			shift 2 ;;
+	-l|--loop)	
+			cloop=$2
+			shift 2 ;;
+	-d|--device)	
+			cdevice=$2
+			shift 2 ;;
+	-m|--mount) 	
+			cmount=$2
+			shift 2 ;;
+	-k|--mkfs)
+			mkfs="yes"
+			shift 1
+			;;
+	-y|--yes)
+			yes="1"
+			shift 1
+			;;
+	-p|--password)
+			cpass=$2
+			shift 2 ;;
+	-e|--verbose)
+			verbose=1
+			shift 2 ;;
+        -h|--help)
+                        usage
+                        ;;
+        -v|--version)
+                        echo $vs
+                        exit
+                        ;;
+
+	--) shift ; break ;;
+        *) echo "Internal error!" ; exit 1 ;;
+    esac
+done
+
+[ -z ${cfile} ]  && usage "ERROR"
+[ ! -e ${cfile} ]  && usage "ERROR: ${cfile} No such file: use 'dfstouch' to create a filesystem."
+[ -z ${cloop} ] && usage "ERROR"
+[ -z ${cdevice} ] && usage "ERROR"
+[ -z ${cmount} ] && usage "ERROR"
+
+cfileb=$(basename $cfile)
+cdevice=$(echo $cdevice | sed -e 's/,/ /g')
+
+k=0
+for i in $cdevice
+do
+	let k=k+1
+	eval device${k}=$(echo $i | cut -d= -f1)
+	eval nb_block${k}=$(echo $i | cut -d= -f2)
+done
+
+bind_loop
+crypt_block_dev
+size_block_dev
+map_crypt_dev
+if [ "${mkfs}" == "yes" ]
+then
+	create_fs
+fi
+mount_fs
+
